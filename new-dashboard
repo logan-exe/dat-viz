@@ -1,0 +1,778 @@
+"use client"
+
+import { useState, useEffect } from "react"
+import { DndProvider, useDrag, useDrop } from "react-dnd"
+import { HTML5Backend } from "react-dnd-html5-backend"
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  ScatterChart,
+  Scatter,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts"
+import { Save, Trash2, Filter, Settings, X, Copy } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+
+// Sample data
+const generateSampleData = () => {
+  const countries = ["USA", "China", "Germany", "Japan", "UK", "France", "India", "Brazil", "Canada", "Australia"]
+  const years = [2014, 2015, 2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023]
+
+  const data = []
+
+  countries.forEach((country) => {
+    years.forEach((year) => {
+      data.push({
+        country,
+        year,
+        profit: Math.floor(Math.random() * 10000),
+        revenue: Math.floor(Math.random() * 20000),
+        expenses: Math.floor(Math.random() * 8000),
+        customers: Math.floor(Math.random() * 1000),
+        satisfaction: Math.floor(Math.random() * 100),
+        marketShare: Math.floor(Math.random() * 30),
+      })
+    })
+  })
+
+  return data
+}
+
+// Item types for drag and drop
+const ItemTypes = {
+  DIMENSION: "dimension",
+  MEASURE: "measure",
+}
+
+// Draggable field component
+const DraggableField = ({ name, type }) => {
+  const [{ isDragging }, drag] = useDrag(() => ({
+    type,
+    item: { name, type },
+    collect: (monitor) => ({
+      isDragging: !!monitor.isDragging(),
+    }),
+  }))
+
+  return (
+    <div
+      ref={drag}
+      className={`px-3 py-2 mb-2 rounded-md text-sm cursor-move border ${
+        isDragging ? "opacity-50" : "opacity-100"
+      } ${type === ItemTypes.DIMENSION ? "bg-blue-50 border-blue-200" : "bg-green-50 border-green-200"}`}
+    >
+      {name}
+    </div>
+  )
+}
+
+// Drop zone component
+const DropZone = ({ title, onDrop, fields, onRemove }) => {
+  const [{ isOver }, drop] = useDrop(() => ({
+    accept: title === "Dimensions" ? ItemTypes.DIMENSION : ItemTypes.MEASURE,
+    drop: (item) => onDrop(item, title),
+    collect: (monitor) => ({
+      isOver: !!monitor.isOver(),
+    }),
+  }))
+
+  return (
+    <div className="w-full">
+      <div className="text-sm font-medium mb-2">{title}</div>
+      <div
+        ref={drop}
+        className={`min-h-[80px] p-2 rounded-md border border-dashed ${
+          isOver ? "border-primary bg-primary/10" : "border-muted-foreground/20"
+        }`}
+      >
+        {fields.length === 0 ? (
+          <div className="text-sm text-muted-foreground text-center py-2">Drop {title.toLowerCase()} here</div>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {fields.map((field, index) => (
+              <div key={index} className="flex items-center gap-1 bg-background rounded-md border px-2 py-1 text-xs">
+                {field.name}
+                <button onClick={() => onRemove(field, title)} className="text-muted-foreground hover:text-destructive">
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// Chart component
+const ChartComponent = ({ type, data, dimensions, measures, config }) => {
+  if (!dimensions.length || !measures.length) {
+    return (
+      <div className="flex items-center justify-center h-[300px] border rounded-md bg-muted/20">
+        <p className="text-muted-foreground">Select dimensions and measures to visualize data</p>
+      </div>
+    )
+  }
+
+  const dimension = dimensions[0].name
+  const chartData = prepareChartData(
+    data,
+    dimension,
+    measures.map((m) => m.name),
+    config,
+  )
+
+  const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042", "#8884d8", "#82ca9d", "#ffc658", "#8dd1e1"]
+
+  switch (type) {
+    case "bar":
+      return (
+        <ResponsiveContainer width="100%" height={300}>
+          <BarChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey={dimension} />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            {measures.map((measure, index) => (
+              <Bar key={index} dataKey={measure.name} fill={COLORS[index % COLORS.length]} name={measure.name} />
+            ))}
+          </BarChart>
+        </ResponsiveContainer>
+      )
+
+    case "line":
+      return (
+        <ResponsiveContainer width="100%" height={300}>
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey={dimension} />
+            <YAxis />
+            <Tooltip />
+            <Legend />
+            {measures.map((measure, index) => (
+              <Line
+                key={index}
+                type="monotone"
+                dataKey={measure.name}
+                stroke={COLORS[index % COLORS.length]}
+                activeDot={{ r: 8 }}
+                name={measure.name}
+              />
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      )
+
+    case "pie":
+      // For pie chart, we'll use the first measure only
+      return (
+        <ResponsiveContainer width="100%" height={300}>
+          <PieChart>
+            <Pie
+              data={chartData}
+              cx="50%"
+              cy="50%"
+              labelLine={false}
+              outerRadius={80}
+              fill="#8884d8"
+              dataKey={measures[0].name}
+              nameKey={dimension}
+              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+            >
+              {chartData.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip />
+            <Legend />
+          </PieChart>
+        </ResponsiveContainer>
+      )
+
+    case "scatter":
+      // For scatter plot, we need at least two measures
+      if (measures.length < 2) {
+        return (
+          <div className="flex items-center justify-center h-[300px] border rounded-md bg-muted/20">
+            <p className="text-muted-foreground">Scatter plot requires at least two measures</p>
+          </div>
+        )
+      }
+
+      return (
+        <ResponsiveContainer width="100%" height={300}>
+          <ScatterChart>
+            <CartesianGrid />
+            <XAxis type="number" dataKey={measures[0].name} name={measures[0].name} />
+            <YAxis type="number" dataKey={measures[1].name} name={measures[1].name} />
+            <Tooltip cursor={{ strokeDasharray: "3 3" }} />
+            <Legend />
+            <Scatter name={`${measures[0].name} vs ${measures[1].name}`} data={chartData} fill="#8884d8" />
+          </ScatterChart>
+        </ResponsiveContainer>
+      )
+
+    case "heatmap":
+      // For heatmap, we'll create a custom implementation using a grid of colored cells
+      return (
+        <div className="h-[300px] overflow-auto">
+          <div
+            className="grid grid-cols-1 gap-1"
+            style={{ gridTemplateColumns: `repeat(${chartData.length}, minmax(60px, 1fr))` }}
+          >
+            {chartData.map((item, rowIndex) => (
+              <div key={rowIndex} className="flex flex-col">
+                <div className="text-xs font-medium mb-1 text-center">{item[dimension]}</div>
+                {measures.map((measure, colIndex) => {
+                  const value = item[measure.name]
+                  const maxValue = Math.max(...chartData.map((d) => d[measure.name]))
+                  const intensity = value / maxValue
+
+                  return (
+                    <div
+                      key={colIndex}
+                      className="p-2 text-xs text-center rounded"
+                      style={{
+                        backgroundColor: `rgba(136, 132, 216, ${intensity})`,
+                        color: intensity > 0.7 ? "white" : "black",
+                        margin: "1px",
+                      }}
+                      title={`${measure.name}: ${value}`}
+                    >
+                      {value}
+                    </div>
+                  )
+                })}
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+
+    default:
+      return <div>Unsupported chart type</div>
+  }
+}
+
+// Helper function to prepare chart data
+const prepareChartData = (data, dimension, measures, config) => {
+  const { filter } = config || {}
+
+  // Apply filter if specified
+  let filteredData = data
+  if (filter && filter.field && filter.value) {
+    filteredData = data.filter((item) => item[filter.field] === filter.value)
+  }
+
+  // Group by dimension
+  const groupedData = {}
+  filteredData.forEach((item) => {
+    const key = item[dimension]
+    if (!groupedData[key]) {
+      groupedData[key] = {}
+      groupedData[key][dimension] = key
+      measures.forEach((measure) => {
+        groupedData[key][measure] = 0
+      })
+    }
+
+    measures.forEach((measure) => {
+      groupedData[key][measure] += Number(item[measure])
+    })
+  })
+
+  return Object.values(groupedData)
+}
+
+// Main application component
+const DataVisualizationApp = () => {
+  const [data, setData] = useState([])
+  const [dimensions, setDimensions] = useState([])
+  const [measures, setMeasures] = useState([])
+  const [selectedDimensions, setSelectedDimensions] = useState([])
+  const [selectedMeasures, setSelectedMeasures] = useState([])
+  const [chartType, setChartType] = useState("bar")
+  const [dashboards, setDashboards] = useState([])
+  const [currentDashboard, setCurrentDashboard] = useState(null)
+  const [charts, setCharts] = useState([])
+  const [filterConfig, setFilterConfig] = useState({ field: "", value: "" })
+  const [isFilterDialogOpen, setIsFilterDialogOpen] = useState(false)
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false)
+  const [newDashboardName, setNewDashboardName] = useState("")
+  const [newChartName, setNewChartName] = useState("")
+
+  // Initialize with sample data
+  useEffect(() => {
+    const sampleData = generateSampleData()
+    setData(sampleData)
+
+    // Extract dimensions and measures from the first data item
+    if (sampleData.length > 0) {
+      const firstItem = sampleData[0]
+      const dims = []
+      const meas = []
+
+      Object.keys(firstItem).forEach((key) => {
+        if (typeof firstItem[key] === "string" || key === "year") {
+          dims.push({ name: key, type: ItemTypes.DIMENSION })
+        } else {
+          meas.push({ name: key, type: ItemTypes.MEASURE })
+        }
+      })
+
+      setDimensions(dims)
+      setMeasures(meas)
+    }
+  }, [])
+
+  // Handle dropping fields
+  const handleDrop = (item, targetZone) => {
+    if (targetZone === "Dimensions") {
+      // For dimensions, we'll replace the current selection
+      if (!selectedDimensions.some((d) => d.name === item.name)) {
+        setSelectedDimensions([...selectedDimensions, item])
+      }
+    } else if (targetZone === "Measures") {
+      // For measures, we'll add to the current selection
+      if (!selectedMeasures.some((m) => m.name === item.name)) {
+        setSelectedMeasures([...selectedMeasures, item])
+      }
+    }
+  }
+
+  // Handle removing fields
+  const handleRemove = (item, zone) => {
+    if (zone === "Dimensions") {
+      setSelectedDimensions(selectedDimensions.filter((d) => d.name !== item.name))
+    } else if (zone === "Measures") {
+      setSelectedMeasures(selectedMeasures.filter((m) => m.name !== item.name))
+    }
+  }
+
+  // Save chart to dashboard
+  const saveChart = () => {
+    if (!newChartName.trim()) return
+
+    const newChart = {
+      id: Date.now(),
+      name: newChartName,
+      type: chartType,
+      dimensions: [...selectedDimensions],
+      measures: [...selectedMeasures],
+      filter: filterConfig,
+    }
+
+    if (currentDashboard) {
+      // Add to existing dashboard
+      const updatedDashboards = dashboards.map((dash) => {
+        if (dash.id === currentDashboard.id) {
+          return {
+            ...dash,
+            charts: [...dash.charts, newChart],
+          }
+        }
+        return dash
+      })
+      setDashboards(updatedDashboards)
+    } else if (newDashboardName.trim()) {
+      // Create new dashboard
+      const newDashboard = {
+        id: Date.now(),
+        name: newDashboardName,
+        charts: [newChart],
+      }
+      setDashboards([...dashboards, newDashboard])
+      setCurrentDashboard(newDashboard)
+    }
+
+    setCharts([...charts, newChart])
+    setIsSaveDialogOpen(false)
+    setNewChartName("")
+    setNewDashboardName("")
+  }
+
+  // Get unique values for a field (for filtering)
+  const getUniqueValues = (field) => {
+    if (!field) return []
+    const values = [...new Set(data.map((item) => item[field]))]
+    return values.sort()
+  }
+
+  // Apply filter
+  const applyFilter = () => {
+    setIsFilterDialogOpen(false)
+  }
+
+  // Get filter options based on dimensions
+  const getFilterOptions = () => {
+    return dimensions.map((dim) => ({
+      value: dim.name,
+      label: dim.name,
+    }))
+  }
+
+  // Duplicate chart
+  const duplicateChart = (chart) => {
+    const newChart = {
+      ...chart,
+      id: Date.now(),
+      name: `${chart.name} (Copy)`,
+    }
+    setCharts([...charts, newChart])
+  }
+
+  // Delete chart
+  const deleteChart = (chartId) => {
+    setCharts(charts.filter((chart) => chart.id !== chartId))
+
+    // Also remove from dashboard if applicable
+    if (currentDashboard) {
+      const updatedDashboards = dashboards.map((dash) => {
+        if (dash.id === currentDashboard.id) {
+          return {
+            ...dash,
+            charts: dash.charts.filter((chart) => chart.id !== chartId),
+          }
+        }
+        return dash
+      })
+      setDashboards(updatedDashboards)
+
+      // Update current dashboard
+      const updatedCurrentDashboard = updatedDashboards.find((dash) => dash.id === currentDashboard.id)
+      setCurrentDashboard(updatedCurrentDashboard)
+    }
+  }
+
+  // Switch dashboard
+  const switchDashboard = (dashboardId) => {
+    const dashboard = dashboards.find((dash) => dash.id === dashboardId)
+    setCurrentDashboard(dashboard)
+    if (dashboard) {
+      setCharts(dashboard.charts)
+    }
+  }
+
+  return (
+    <DndProvider backend={HTML5Backend}>
+      <div className="flex flex-col min-h-screen">
+        <header className="border-b bg-background p-4">
+          <div className="flex items-center justify-between">
+            <h1 className="text-xl font-bold">Data Visualization App</h1>
+
+            <div className="flex items-center gap-2">
+              {dashboards.length > 0 && (
+                <Select
+                  value={currentDashboard?.id?.toString()}
+                  onValueChange={(value) => switchDashboard(Number.parseInt(value))}
+                >
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue placeholder="Select Dashboard" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {dashboards.map((dash) => (
+                      <SelectItem key={dash.id} value={dash.id.toString()}>
+                        {dash.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+
+              <Dialog open={isFilterDialogOpen} onOpenChange={setIsFilterDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline" size="sm">
+                    <Filter className="h-4 w-4 mr-2" />
+                    Filter
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Filter Data</DialogTitle>
+                    <DialogDescription>Select a field and value to filter the data.</DialogDescription>
+                  </DialogHeader>
+
+                  <div className="grid gap-4 py-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="filter-field" className="text-right">
+                        Field
+                      </Label>
+                      <Select
+                        value={filterConfig.field}
+                        onValueChange={(value) => setFilterConfig({ ...filterConfig, field: value, value: "" })}
+                        className="col-span-3"
+                      >
+                        <SelectTrigger id="filter-field">
+                          <SelectValue placeholder="Select field" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {dimensions.map((dim) => (
+                            <SelectItem key={dim.name} value={dim.name}>
+                              {dim.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {filterConfig.field && (
+                      <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="filter-value" className="text-right">
+                          Value
+                        </Label>
+                        <Select
+                          value={filterConfig.value}
+                          onValueChange={(value) => setFilterConfig({ ...filterConfig, value })}
+                          className="col-span-3"
+                        >
+                          <SelectTrigger id="filter-value">
+                            <SelectValue placeholder="Select value" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {getUniqueValues(filterConfig.field).map((value) => (
+                              <SelectItem key={value} value={value.toString()}>
+                                {value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    )}
+                  </div>
+
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setFilterConfig({ field: "", value: "" })}>
+                      Clear Filter
+                    </Button>
+                    <Button onClick={applyFilter}>Apply Filter</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={isSaveDialogOpen} onOpenChange={setIsSaveDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button size="sm">
+                    <Save className="h-4 w-4 mr-2" />
+                    Save Chart
+                  </Button>
+                </DialogTrigger>
+                <DialogContent>
+                  <DialogHeader>
+                    <DialogTitle>Save Chart</DialogTitle>
+                    <DialogDescription>Save your chart to a new or existing dashboard.</DialogDescription>
+                  </DialogHeader>
+
+                  <div className="grid gap-4 py-4">
+                    <div className="grid grid-cols-4 items-center gap-4">
+                      <Label htmlFor="chart-name" className="text-right">
+                        Chart Name
+                      </Label>
+                      <Input
+                        id="chart-name"
+                        value={newChartName}
+                        onChange={(e) => setNewChartName(e.target.value)}
+                        className="col-span-3"
+                      />
+                    </div>
+
+                    {!currentDashboard && (
+                      <div className="grid grid-cols-4 items-center gap-4">
+                        <Label htmlFor="dashboard-name" className="text-right">
+                          Dashboard Name
+                        </Label>
+                        <Input
+                          id="dashboard-name"
+                          value={newDashboardName}
+                          onChange={(e) => setNewDashboardName(e.target.value)}
+                          className="col-span-3"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <DialogFooter>
+                    <Button variant="outline" onClick={() => setIsSaveDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button onClick={saveChart}>Save</Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            </div>
+          </div>
+        </header>
+
+        <div className="flex flex-1">
+          {/* Sidebar with fields */}
+          <div className="w-64 border-r p-4 bg-muted/10">
+            <h2 className="text-lg font-semibold mb-4">Fields</h2>
+
+            <div className="mb-6">
+              <h3 className="text-sm font-medium mb-2">Dimensions</h3>
+              <div className="space-y-1">
+                {dimensions
+                  .filter((dim) => !selectedDimensions.some((selected) => selected.name === dim.name))
+                  .map((dim, index) => (
+                    <DraggableField key={index} name={dim.name} type={dim.type} />
+                  ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="text-sm font-medium mb-2">Measures</h3>
+              <div className="space-y-1">
+                {measures
+                  .filter((measure) => !selectedMeasures.some((selected) => selected.name === measure.name))
+                  .map((measure, index) => (
+                    <DraggableField key={index} name={measure.name} type={measure.type} />
+                  ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Main content */}
+          <div className="flex-1 p-4">
+            {/* Chart builder */}
+            <div className="mb-8">
+              <h2 className="text-lg font-semibold mb-4">Chart Builder</h2>
+
+              <div className="grid grid-cols-2 gap-4 mb-4">
+                <DropZone title="Dimensions" onDrop={handleDrop} fields={selectedDimensions} onRemove={handleRemove} />
+                <DropZone title="Measures" onDrop={handleDrop} fields={selectedMeasures} onRemove={handleRemove} />
+              </div>
+
+              <div className="flex items-center gap-4 mb-4">
+                <div className="flex items-center space-x-2">
+                  <Label htmlFor="chart-type">Chart Type:</Label>
+                  <Select value={chartType} onValueChange={setChartType}>
+                    <SelectTrigger id="chart-type" className="w-[180px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bar">Bar Chart</SelectItem>
+                      <SelectItem value="line">Line Chart</SelectItem>
+                      <SelectItem value="pie">Pie Chart</SelectItem>
+                      <SelectItem value="scatter">Scatter Plot</SelectItem>
+                      <SelectItem value="heatmap">Heat Map</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {filterConfig.field && (
+                  <div className="flex items-center gap-2 text-sm">
+                    <span className="font-medium">Filter:</span>
+                    <span>
+                      {filterConfig.field} = {filterConfig.value}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-5 w-5"
+                      onClick={() => setFilterConfig({ field: "", value: "" })}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-lg">Chart Preview</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ChartComponent
+                    type={chartType}
+                    data={data}
+                    dimensions={selectedDimensions}
+                    measures={selectedMeasures}
+                    config={{ filter: filterConfig }}
+                  />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Saved charts */}
+            {charts.length > 0 && (
+              <div>
+                <h2 className="text-lg font-semibold mb-4">
+                  {currentDashboard ? `Dashboard: ${currentDashboard.name}` : "Saved Charts"}
+                </h2>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {charts.map((chart) => (
+                    <Card key={chart.id}>
+                      <CardHeader className="pb-2">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-base">{chart.name}</CardTitle>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" size="icon" className="h-8 w-8">
+                                <Settings className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem onClick={() => duplicateChart(chart)}>
+                                <Copy className="h-4 w-4 mr-2" />
+                                Duplicate
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => deleteChart(chart.id)}>
+                                <Trash2 className="h-4 w-4 mr-2" />
+                                Delete
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
+                        <CardDescription>
+                          {chart.type.charAt(0).toUpperCase() + chart.type.slice(1)} Chart
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <ChartComponent
+                          type={chart.type}
+                          data={data}
+                          dimensions={chart.dimensions}
+                          measures={chart.measures}
+                          config={{ filter: chart.filter }}
+                        />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </DndProvider>
+  )
+}
+
+export default DataVisualizationApp
+
